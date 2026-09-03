@@ -132,6 +132,53 @@ export default function AuctionScreen() {
 
   useEffect(() => () => clearPeerResponseTimer(), [clearPeerResponseTimer]);
 
+  // ── AUTO-ADVANCE: SOLD/PASSED → next player ─────────────────
+  useEffect(() => {
+    if (hydrationStatus !== "ready" || !auction || !auctionMatchesSelection) return;
+    if (auction.phase !== "SOLD" && auction.phase !== "PASSED") return;
+    const timer = window.setTimeout(() => {
+      const current = useGameStore.getState().auction;
+      if (current?.phase === "SOLD" || current?.phase === "PASSED") advance();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [advance, auction, auction?.phase, hydrationStatus, auctionMatchesSelection]);
+
+  // ── AUTO-ADVANCE: PLAYER_PRESENTATION → FIRST_BID ──────────
+  useEffect(() => {
+    if (hydrationStatus !== "ready" || !auction || !auctionMatchesSelection) return;
+    if (auction.phase !== "PLAYER_PRESENTATION") return;
+    const timer = window.setTimeout(() => {
+      const current = useGameStore.getState().auction;
+      if (current?.phase === "PLAYER_PRESENTATION") advance();
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [advance, auction, auction?.phase, hydrationStatus, auctionMatchesSelection]);
+
+  // ── AUTO-ADVANCE: FIRST_BID → AI opens (if user doesn't bid) ──
+  useEffect(() => {
+    if (hydrationStatus !== "ready" || !auction || !auctionMatchesSelection) return;
+    if (auction.phase !== "FIRST_BID") return;
+    const timer = window.setTimeout(() => {
+      const current = useGameStore.getState().auction;
+      if (current?.phase === "FIRST_BID" && !current.highestBidder) advance();
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [advance, auction, auction?.phase, auction?.currentIndex, hydrationStatus, auctionMatchesSelection]);
+
+  // ── AUTO-ADVANCE: AI leading → let AI teams keep bidding ────
+  useEffect(() => {
+    if (hydrationStatus !== "ready" || !auction || !auctionMatchesSelection) return;
+    if (auction.phase !== "BIDDING") return;
+    if (auction.highestBidder === "YOU" || !auction.highestBidder) return;
+    const userState = auction.bidderStates?.[auction.userFranchiseId];
+    if (userState?.status === "FOLDED") return;
+    const timer = window.setTimeout(() => {
+      const current = useGameStore.getState().auction;
+      if (current?.phase === "BIDDING" && current.highestBidder !== "YOU" && current.highestBidder) advance();
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [advance, auction, auction?.phase, auction?.highestBidder, auction?.events.length, hydrationStatus, auctionMatchesSelection]);
+
   useEffect(() => { hydrate(franchiseId, onboarding.setup ?? auctionSeed); }, [auctionSeed, franchiseId, hydrate, onboarding.setup]);
   useEffect(() => { if (toast === "Auction room ready") return; const id = window.setTimeout(() => setToast(""), 2600); return () => window.clearTimeout(id); }, [toast]);
   useEffect(() => {
@@ -205,7 +252,7 @@ export default function AuctionScreen() {
       </aside>
 
       <section className="auction-stage-wrap" aria-label="Auction stage">
-        <div className="scene-toolbar"><div className="scene-label"><span className="pulse" /> AUCTION FLOOR <span className="slash">/</span> ROUND {marketRound}{peerResponsePending && <span className="peer-response-badge"><i /> RIVALS RESPONDING · {peerResponseSeconds}s</span>}{peerResponsePaused && <span className="peer-response-badge paused"><i /> RESPONSE PAUSED</span>}</div><div className="scene-actions"><button className="scene-control" title="Toggle sound" onClick={toggleSound}>{auction.soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}</button>{peerResponsePending ? <button className="scene-control" title="Pause rival response" onClick={pausePeerResponse}><span className="pause-glyph">Ⅱ</span></button> : <button className="scene-control" title="Advance one market turn" onClick={() => respondToPeers("Auction advanced one market turn")} disabled={auction.phase === "FIRST_BID" || userHasPassed}><FastForward size={15} /></button>}{peerResponsePaused && <button className="scene-control" title="Resume rival response" onClick={() => respondToPeers("Rival response resumed")}><Play size={14} /></button>}</div></div>
+        <div className="scene-toolbar"><div className="scene-label"><span className="pulse" /> AUCTION FLOOR <span className="slash">/</span> ROUND {marketRound}{peerResponsePending && <span className="peer-response-badge"><i /> RIVALS RESPONDING · {peerResponseSeconds}s</span>}</div><div className="scene-actions"><button className="scene-control" title="Toggle sound" onClick={toggleSound}>{auction.soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}</button></div></div>
         <div className={`auction-scene shot-${cameraShot.toLowerCase()}`}>
           <div className="scene-3d">
             <Scene3D tension={auction.tension} phase={auction.phase} accentColor={team.color} currentBid={auction.currentBid} highestBidder={auction.highestBidder} isSold={auction.phase === "SOLD"} isPassed={auction.phase === "PASSED"} />
@@ -213,7 +260,17 @@ export default function AuctionScreen() {
           <div className="shot-badge"><Eye size={13} /> {cameraShot.replaceAll("_", " ")}</div><div className="tension-meter"><span><Flame size={13} /> TENSION</span><div><i style={{ width: `${auction.tension}%` }} /></div><b>{auction.tension}</b></div>
           {commentary && <div className="commentary-bar"><div className="commentary-text">{commentary}</div>{auctioneerLine && <div className="auctioneer-text"><Mic size={10} style={{ marginRight: 4, verticalAlign: "middle" }} />{auctioneerLine}</div>}</div>}
           <div className="ceiling-lights"><i /><i /><i /><i /><i /></div><div className="back-wall"><div className="wall-logo">IPL <span>27</span></div><div className="wall-copy">THE BID<br /><b>BEGINS</b></div><div className="wall-lines" /></div>
-          <div className="stage-platform"><div className="stage-screen player-entrance" key={current.playerId}><div className="screen-kicker">NOW ON THE BLOCK <span>•</span> {auction.category}</div><div className="stage-player-portrait"><PlayerPortrait player={current} size={74} teamId={team.id} showRoleBadge showRating /></div><div className="screen-name">{current.identity.name.toUpperCase()}</div><div className="screen-role">{roleLabel(current.role.primary)} <span>•</span> {current.identity.nationality} <span>•</span> {current.auctionData.cappedStatus}</div><div className="screen-price">{auction.currentBid > 0 ? formatCr(auction.currentBid) : `Base ${formatCr(current.auctionData.basePrice ?? 1)}`}</div></div><div className="podium"><div className="podium-top"><Gavel size={19} /><span>AUCTIONEER</span></div><div className="podium-face" /></div></div>
+          <div className="stage-platform">
+            <div className="player-card-mini" key={current.playerId}>
+              <PlayerPortrait player={current} size={48} teamId={team.id} showRoleBadge />
+              <div className="player-card-mini-info">
+                <strong>{current.identity.shortName}</strong>
+                <small>{roleLabel(current.role.primary)} • {current.identity.nationality}</small>
+                <span className="player-card-mini-price">{auction.currentBid > 0 ? formatCr(auction.currentBid) : `Base ${formatCr(current.auctionData.basePrice ?? 1)}`}</span>
+              </div>
+            </div>
+            <div className="podium"><div className="podium-top"><Gavel size={19} /><span>AUCTIONEER</span></div><div className="podium-face" /></div>
+          </div>
           <div className="room-floor"><div className="desk user-desk"><span className="desk-team">{team.shortName}</span><div className="desk-screen">{formatCr(auction.userBudget)}</div><small className="desk-status">YOUR TABLE</small></div>{bidderRows.filter((bidder) => bidder.team.id !== franchiseId).map((bidder, i) => <div className={`desk ai-desk d${(i % 9) + 1} ${bidder.status.toLowerCase()}`} key={bidder.team.id}><span className="desk-team">{bidder.team.shortName}</span><div className="desk-screen">{formatCr(bidder.budget)}</div><small className="desk-status">{bidder.status === "WATCHING" ? "MONITORING" : bidder.status.replaceAll("_", " ")}</small></div>)}</div>
           <div className="scene-status"><div className="status-event">{auction.message}</div><div className="status-round"><span>LOT {String(auction.currentIndex + 1).padStart(2, "0")}</span><b>{auction.remainingPlayers} PLAYERS REMAINING</b></div></div>
         </div>
@@ -235,6 +292,12 @@ export default function AuctionScreen() {
 }
 
 function roleLabel(role: string) { return role === "AR" ? "ALL-ROUNDER" : role === "WK" ? "WICKETKEEPER" : role === "BAT" ? "BATTER" : "BOWLER"; }
+
+function getTeamShortName(actor: string): string {
+  if (actor === "YOU") return "YOU";
+  const team = FRANCHISES.find((f) => f.id === actor);
+  return team?.shortName ?? actor;
+}
 
 export function AuctionReportScreen() {
   const router = useRouter();

@@ -134,3 +134,10 @@
 .audio-toggle { position:fixed; bottom:20px; right:20px; z-index:50; width:44px; height:44px; border-radius:50%; background:rgba(7,16,20,.9); border:1px solid rgba(110,208,189,.3); color:#6ed0bd; display:grid; place-items:center; cursor:pointer; backdrop-filter:blur(8px); transition:all .2s; }
 .audio-toggle:hover { background:rgba(110,208,189,.15); border-color:rgba(110,208,189,.5); }
 .audio-toggle.muted { color:#667b81; border-color:rgba(198,220,231,.15); }
+
+/* Mini player card (top-left of stage) */
+.player-card-mini { position:absolute; top:12px; left:12px; z-index:10; display:flex; align-items:center; gap:10px; padding:8px 12px; background:rgba(7,16,20,.88); border:1px solid rgba(198,220,231,.12); backdrop-filter:blur(6px); animation:playerSlideIn .5s cubic-bezier(.16,1,.3,1); }
+.player-card-mini-info { display:flex; flex-direction:column; gap:1px; }
+.player-card-mini-info strong { color:#e8e2d8; font:700 13px 'Barlow Condensed'; letter-spacing:.4px; }
+.player-card-mini-info small { color:#7e9698; font:600 9px 'Barlow Condensed'; letter-spacing:.5px; }
+.player-card-mini-price { color:#e27a47; font:700 11px 'Barlow Condensed'; letter-spacing:.3px; margin-top:1px; }

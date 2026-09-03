@@ -3,9 +3,6 @@
 let audioCtx: AudioContext | null = null;
 let enabled = true;
 let initialized = false;
-let speechQueue: Array<{ text: string; voice: "male" | "female"; priority: boolean }> = [];
-let speaking = false;
-let speechEndCallback: (() => void) | null = null;
 
 let ambienceNodes: {
   source: AudioBufferSourceNode;
@@ -17,21 +14,19 @@ let ambienceNodes: {
 let tensionOsc: OscillatorNode | null = null;
 let tensionGain: GainNode | null = null;
 
-function ctx(): AudioContext | null {
+function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!audioCtx) {
     try {
       audioCtx = new (window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
   return audioCtx;
 }
 
 function ensureCtx(): AudioContext | null {
-  const c = ctx();
+  const c = getCtx();
   if (c && c.state === "suspended") c.resume().catch(() => {});
   return c;
 }
@@ -42,76 +37,73 @@ function formatCrore(amount: number): string {
   return `${Math.round(amount * 100)} lakh`;
 }
 
-function findVoice(lang: string, preferGender?: "male" | "female"): SpeechSynthesisVoice | undefined {
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function pickVoice(preferred: "male" | "female"): SpeechSynthesisVoice | undefined {
   if (typeof window === "undefined") return undefined;
-  const synth = window.speechSynthesis;
-  if (!synth) return undefined;
-  const voices = synth.getVoices();
-  const candidates = voices.filter((v) => v.lang.startsWith(lang));
-  if (candidates.length === 0) return undefined;
-  if (preferGender) {
-    const match = candidates.find((v) =>
-      v.name.toLowerCase().includes(preferGender)
-    );
-    if (match) return match;
-  }
-  return candidates[0];
-}
+  const voices = window.speechSynthesis?.getVoices() ?? [];
 
-function speakQueued(): void {
-  if (speaking || speechQueue.length === 0) return;
-  speaking = true;
-
-  const { text, voice, priority } = speechQueue.shift()!;
-  const synth = window.speechSynthesis;
-  if (!synth) { speaking = false; return; }
-
-  synth.cancel();
-
-  const utter = new SpeechSynthesisUtterance(text);
-
-  if (voice === "male") {
-    const v = findVoice("en", "male") || findVoice("en");
-    if (v) utter.voice = v;
-    utter.rate = 1.08;
-    utter.pitch = 0.92;
-    utter.volume = 1.0;
-    utter.lang = "en-IN";
-  } else {
-    const v = findVoice("hi") || findVoice("en", "female");
-    if (v) utter.voice = v;
-    utter.rate = 1.02;
-    utter.pitch = 1.15;
-    utter.volume = 0.95;
-    utter.lang = v?.lang || "hi-IN";
+  if (preferred === "male") {
+    return voices.find((v) => v.lang.startsWith("en-IN"))
+      || voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes("google uk english male"))
+      || voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes("daniel"))
+      || voices.find((v) => v.lang.startsWith("en"))
+      || voices[0];
   }
 
-  utter.onend = () => {
-    speaking = false;
-    setTimeout(speakQueued, 80);
-  };
-
-  utter.onerror = () => {
-    speaking = false;
-    setTimeout(speakQueued, 80);
-  };
-
-  synth.speak(utter);
+  return voices.find((v) => v.lang.startsWith("hi"))
+    || voices.find((v) => v.lang.startsWith("en-IN") && v.name.toLowerCase().includes("female"))
+    || voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes("female"))
+    || voices.find((v) => v.lang.startsWith("en"))
+    || voices[0];
 }
 
-function speakAsync(text: string, voice: "male" | "female", priority: boolean = false): Promise<void> {
+function speakNow(text: string, voiceType: "male" | "female", opts?: { rate?: number; pitch?: number; volume?: number }): Promise<void> {
   if (!enabled || typeof window === "undefined") return Promise.resolve();
+  const synth = window.speechSynthesis;
+  if (!synth) return Promise.resolve();
+
   return new Promise((resolve) => {
-    speechQueue.push({ text, voice, priority });
-    const checkDone = setInterval(() => {
-      if (!speaking && speechQueue.length === 0) {
-        clearInterval(checkDone);
-        resolve();
-      }
-    }, 100);
-    speakQueued();
-    setTimeout(resolve, 15000);
+    synth.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    const voice = pickVoice(voiceType);
+    if (voice) utter.voice = voice;
+
+    if (voiceType === "male") {
+      utter.rate = opts?.rate ?? 1.0;
+      utter.pitch = opts?.pitch ?? 1.0;
+      utter.volume = opts?.volume ?? 1.0;
+      utter.lang = "en-IN";
+    } else {
+      utter.rate = opts?.rate ?? 0.95;
+      utter.pitch = opts?.pitch ?? 1.1;
+      utter.volume = opts?.volume ?? 0.9;
+      utter.lang = voice?.lang || "hi-IN";
+    }
+
+    let resolved = false;
+    const finish = () => { if (!resolved) { resolved = true; resolve(); } };
+    utter.onend = finish;
+    utter.onerror = finish;
+    synth.speak(utter);
+    setTimeout(finish, 12000);
   });
+}
+
+function playTone(c: AudioContext, freq: number, duration: number, type: OscillatorType = "sine", volume: number = 0.15, delaySec: number = 0) {
+  if (!enabled) return;
+  const osc = c.createOscillator();
+  const gain = c.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, c.currentTime + delaySec);
+  gain.gain.setValueAtTime(volume, c.currentTime + delaySec);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + delaySec + duration);
+  osc.connect(gain);
+  gain.connect(c.destination);
+  osc.start(c.currentTime + delaySec);
+  osc.stop(c.currentTime + delaySec + duration + 0.01);
 }
 
 function createNoiseBuffer(c: AudioContext, seconds: number): AudioBuffer {
@@ -130,230 +122,115 @@ function createNoiseBuffer(c: AudioContext, seconds: number): AudioBuffer {
   return buf;
 }
 
-function playTone(
-  c: AudioContext,
-  freq: number,
-  duration: number,
-  type: OscillatorType = "sine",
-  volume: number = 0.15,
-  delay: number = 0
-) {
-  if (!enabled) return;
-  const osc = c.createOscillator();
-  const gain = c.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, c.currentTime + delay);
-  gain.gain.setValueAtTime(volume, c.currentTime + delay);
-  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + delay + duration);
-  osc.connect(gain);
-  gain.connect(c.destination);
-  osc.start(c.currentTime + delay);
-  osc.stop(c.currentTime + delay + duration + 0.01);
-}
-
-function playNoiseBurst(
-  c: AudioContext,
-  duration: number,
-  volume: number = 0.08,
-  filterFreq: number = 2000,
-  delay: number = 0
-) {
-  if (!enabled) return;
-  const len = c.sampleRate * duration;
-  const buf = c.createBuffer(1, len, c.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) {
-    const env = 1 - i / len;
-    data[i] = (Math.random() * 2 - 1) * env;
-  }
-  const src = c.createBufferSource();
-  src.buffer = buf;
-  const filter = c.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = filterFreq;
-  const gain = c.createGain();
-  gain.gain.setValueAtTime(volume, c.currentTime + delay);
-  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + delay + duration);
-  src.connect(filter);
-  filter.connect(gain);
-  gain.connect(c.destination);
-  src.start(c.currentTime + delay);
-}
-
 export const audioEngine = {
   init(): void {
     if (initialized) return;
     initialized = true;
     ensureCtx();
     if (typeof window !== "undefined" && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.getVoices();
-        window.speechSynthesis.onvoiceschanged = () => {
-          window.speechSynthesis?.getVoices();
-        };
-      } catch {}
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis?.getVoices();
     }
   },
 
   setEnabled(on: boolean): void {
     enabled = on;
     if (!on) {
-      speechQueue = [];
-      speaking = false;
       this.stopAmbience();
       try { window.speechSynthesis?.cancel(); } catch {}
     }
   },
 
-  isEnabled(): boolean {
-    return enabled;
-  },
-
-  clearSpeechQueue(): void {
-    speechQueue = [];
-    speaking = false;
-    try { window.speechSynthesis?.cancel(); } catch {}
-  },
+  isEnabled(): boolean { return enabled; },
 
   // ── AUCTIONEER (English Male) ──────────────────────────────
 
-  auctioneerSay(text: string): Promise<void> {
-    return speakAsync(text, "male");
-  },
-
   async auctionIntro(): Promise<void> {
-    const lines = [
-      "Welcome to the IPL 2027 Mega Auction!",
-      "Ladies and gentlemen, good evening and welcome to the biggest sporting auction event of the year.",
-      "Ten franchises, over 160 players, and a total purse of 125 crore each. This is where champions are made.",
-      "The rules are simple. Each franchise can field up to 25 players, with a maximum of 8 overseas stars.",
-      "We begin with the marquee set. Let the bidding wars begin!",
-    ];
-    for (const line of lines) {
-      await speakAsync(line, "male");
-      await new Promise((r) => setTimeout(r, 600));
-    }
+    await speakNow("Welcome to the IPL 2027 Mega Auction!", "male", { rate: 0.95 });
+    await delay(800);
+    await speakNow("Ladies and gentlemen, good evening. Ten franchises, over 160 players, and a total purse of 125 crore each.", "male", { rate: 0.92 });
+    await delay(600);
+    await speakNow("This is where champions are made. Let the bidding wars begin!", "male", { rate: 0.95 });
   },
 
   async announcePlayer(name: string, nationality: string, role: string, basePrice: number): Promise<void> {
-    const roleMap: Record<string, string> = {
-      BAT: "batsman",
-      BOWL: "bowler",
-      AR: "all-rounder",
-      WK: "wicketkeeper-batsman",
-    };
+    const roleMap: Record<string, string> = { BAT: "batsman", BOWL: "bowler", AR: "all-rounder", WK: "wicketkeeper" };
     const roleLabel = roleMap[role] || role;
-    const amt = formatCrore(basePrice);
-    await speakAsync(
-      `Next up on the block, from ${nationality}, the ${roleLabel} — ${name}! Base price set at ${amt} crore. Who wants to start the bidding?`,
-      "male"
-    );
+    await speakNow(`${nationality}'s finest ${roleLabel}, ${name}. Base price, ${formatCrore(basePrice)}.`, "male", { rate: 0.93 });
   },
 
-  async announceBidStart(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} opens at ${formatCrore(amount)}!`, "male");
+  async announceOpenBid(teamName: string, amount: number): Promise<void> {
+    await speakNow(`${teamName} opens at ${formatCrore(amount)}!`, "male", { rate: 1.0 });
   },
 
   async announceBid(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} at ${formatCrore(amount)}!`, "male");
+    await speakNow(`${teamName} at ${formatCrore(amount)}!`, "male", { rate: 1.0 });
   },
 
   async announceCounterBid(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} counters! ${formatCrore(amount)}!`, "male");
+    await speakNow(`${teamName} counters! ${formatCrore(amount)}!`, "male", { rate: 1.02 });
   },
 
   async announceGoingOnce(amount: number): Promise<void> {
-    await speakAsync(`Going once... ${formatCrore(amount)}`, "male");
-    await new Promise((r) => setTimeout(r, 1500));
+    await speakNow(`Going once. ${formatCrore(amount)}.`, "male", { rate: 0.88 });
+    await delay(1400);
   },
 
   async announceGoingTwice(amount: number): Promise<void> {
-    await speakAsync(`Going twice... ${formatCrore(amount)}`, "male");
-    await new Promise((r) => setTimeout(r, 1200));
+    await speakNow(`Going twice. ${formatCrore(amount)}.`, "male", { rate: 0.85 });
+    await delay(1100);
   },
 
   async announceSold(playerName: string, teamName: string, amount: number): Promise<void> {
     this.playGavel();
-    await speakAsync(`SOLD! ${playerName} goes to ${teamName} for ${formatCrore(amount)}!`, "male", true);
+    await delay(300);
+    await speakNow(`Sold! ${playerName} goes to ${teamName} for ${formatCrore(amount)}!`, "male", { rate: 0.92, volume: 1.0 });
   },
 
   async announcePassed(playerName: string): Promise<void> {
-    await speakAsync(`And that's it. ${playerName} goes unsold this time.`, "male", true);
+    await speakNow(`${playerName} goes unsold.`, "male", { rate: 0.9 });
   },
 
   // ── COMMENTATOR (Hindi Female) ─────────────────────────────
 
-  commentatorSay(text: string): Promise<void> {
-    return speakAsync(text, "female");
+  async commentatorSay(text: string): Promise<void> {
+    await speakNow(text, "female", { rate: 0.92 });
   },
 
   async commentatorIntro(): Promise<void> {
-    const lines = [
-      "Namaskar dosto! Main aapki commentary host hoon. Bohot exciting auction hone wala hai aaj.",
-      "Dekhte hain kaunsi team kis player ke liye kitni badi rakam lagati hai. Bohot interesting hoga!",
-    ];
-    for (const line of lines) {
-      await speakAsync(line, "female");
-      await new Promise((r) => setTimeout(r, 800));
-    }
+    await speakNow("Namaskar dosto! Bohot exciting auction hone wala hai aaj.", "female", { rate: 0.9 });
+    await delay(600);
+    await speakNow("Dekhte hain kaunsi team kis player ke liye kitni badi rakam lagati hai.", "female", { rate: 0.9 });
   },
 
-  async commentatorPlayerIntro(name: string, role: string, stats: string): Promise<void> {
-    await speakAsync(
-      `${name} bohot achhe ${role === "BAT" ? "batsman" : role === "BOWL" ? "bowler" : role === "WK" ? "wicketkeeper" : "all-rounder"} hain. ${stats}`,
-      "female"
-    );
+  async commentatorPlayerContext(name: string, role: string, stats: string): Promise<void> {
+    const roleHindi = role === "BAT" ? "batsman" : role === "BOWL" ? "bowler" : role === "WK" ? "wicketkeeper" : "all-rounder";
+    await speakNow(`${name} bohot achhe ${roleHindi} hain. ${stats}.`, "female", { rate: 0.9 });
   },
 
-  async commentatorBiddingWar(team1: string, team2: string, amount: number): Promise<void> {
+  async commentatorBidWar(team1: string, team2: string): Promise<void> {
     const lines = [
-      `Kya baat hai! ${team1} aur ${team2} ke beech zordaar takkar chal rahi hai! ${formatCrore(amount)} tak pahunch gayi bid!`,
-      `Dekhiye dosto, ${team1} aur ${team2} dono piche hatne ko tayyar nahi! Bohot intense scene hai auction room mein!`,
-      `Wow! Ye toh bohot exciting ho gaya! ${formatCrore(amount)} ki bid par dono teams lad rahi hain!`,
+      `${team1} aur ${team2} ke beech zordaar takkar chal rahi hai!`,
+      `Dekhiye dosto, ${team1} aur ${team2} dono piche hatne ko tayyar nahi!`,
+      `Wow! ${team1} aur ${team2} lad rahi hain, bohot exciting hai!`,
     ];
-    const line = lines[Math.floor(Math.random() * lines.length)];
-    await speakAsync(line, "female");
+    await speakNow(lines[Math.floor(Math.random() * lines.length)], "female", { rate: 0.92 });
   },
 
-  async commentatorBigBid(teamName: string, amount: number): Promise<void> {
+  async commentatorSoldReaction(playerName: string, teamName: string, amount: number): Promise<void> {
     const lines = [
-      `${teamName} ne badi bid lagayi hai! ${formatCrore(amount)}! Bohot daring move hai ye!`,
-      `Oho! ${formatCrore(amount)} ki bid! ${teamName} ko ye player chahiye, koi shak nahi!`,
+      `Shandaar pickup! ${playerName} ${teamName} ke paas gaye ${formatCrore(amount)} mein!`,
+      `Bohot badhiya! ${teamName} ko mila ek champion player!`,
     ];
-    const line = lines[Math.floor(Math.random() * lines.length)];
-    await speakAsync(line, "female");
+    await speakNow(lines[Math.floor(Math.random() * lines.length)], "female", { rate: 0.9 });
   },
 
-  async commentatorSold(playerName: string, teamName: string, amount: number): Promise<void> {
-    const lines = [
-      `Bohot badhiya! ${playerName} ${teamName} ke paas gaye ${formatCrore(amount)} mein! Shandaar pickup hai ye!`,
-      `And finally! ${playerName} ${teamName} ka ho gaya! ${formatCrore(amount)} mein ek shandaar player mil gaya unhe!`,
-    ];
-    const line = lines[Math.floor(Math.random() * lines.length)];
-    await speakAsync(line, "female");
-  },
-
-  async commentatorUnsold(playerName: string): Promise<void> {
-    const lines = [
-      `Afsos! ${playerName} unsold rahe. Bohot surprising hai ye.`,
-      `${playerName} ko koi nahi chahiye tha aaj? Bohot badi disappointment hai ye toh!`,
-    ];
-    const line = lines[Math.floor(Math.random() * lines.length)];
-    await speakAsync(line, "female");
+  async commentatorUnsoldReaction(playerName: string): Promise<void> {
+    await speakNow(`Afsos! ${playerName} unsold rahe. Bohot surprising hai ye.`, "female", { rate: 0.9 });
   },
 
   async commentatorBudgetAlert(teamName: string, remaining: number): Promise<void> {
-    await speakAsync(
-      `Dhyan dein dosto! ${teamName} ke paas ab sirf ${formatCrore(remaining)} bache hain purse mein. Bohot soch samajh ke chalna hoga!`,
-      "female"
-    );
-  },
-
-  async commentatorSquadFull(teamName: string): Promise<void> {
-    await speakAsync(
-      `${teamName} ki squad bhar chuki hai! Ab unhe sirf overseas slots ke liye dekhna hoga.`,
-      "female"
-    );
+    await speakNow(`${teamName} ke paas ab sirf ${formatCrore(remaining)} bache hain purse mein.`, "female", { rate: 0.9 });
   },
 
   // ── SFX ───────────────────────────────────────────────────
@@ -375,7 +252,7 @@ export const audioEngine = {
     filter.Q.value = 0.7;
 
     const gain = c.createGain();
-    gain.gain.value = 0.012;
+    gain.gain.value = 0.01;
 
     const lfo = c.createOscillator();
     const lfoGain = c.createGain();
@@ -406,102 +283,64 @@ export const audioEngine = {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-
     const buf = createNoiseBuffer(c, 1.8);
     const src = c.createBufferSource();
     src.buffer = buf;
-
     const bp = c.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 1200;
-    bp.Q.value = 0.5;
-
+    bp.type = "bandpass"; bp.frequency.value = 1200; bp.Q.value = 0.5;
     const gain = c.createGain();
     gain.gain.setValueAtTime(0, c.currentTime);
-    gain.gain.linearRampToValueAtTime(0.22, c.currentTime + 0.15);
-    gain.gain.linearRampToValueAtTime(0.15, c.currentTime + 0.5);
+    gain.gain.linearRampToValueAtTime(0.2, c.currentTime + 0.15);
+    gain.gain.linearRampToValueAtTime(0.14, c.currentTime + 0.5);
     gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.8);
-
-    src.connect(bp);
-    bp.connect(gain);
-    gain.connect(c.destination);
-    src.start();
-    src.stop(c.currentTime + 1.8);
-
-    playTone(c, 600, 0.35, "sine", 0.05, 0.1);
-    playTone(c, 750, 0.3, "sine", 0.04, 0.2);
-    playTone(c, 900, 0.25, "sine", 0.03, 0.3);
-    playTone(c, 1100, 0.2, "sine", 0.02, 0.35);
+    src.connect(bp); bp.connect(gain); gain.connect(c.destination);
+    src.start(); src.stop(c.currentTime + 1.8);
+    playTone(c, 600, 0.3, "sine", 0.04, 0.1);
+    playTone(c, 800, 0.25, "sine", 0.03, 0.2);
   },
 
   crowdMurmur(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-
-    const buf = createNoiseBuffer(c, 2.5);
+    const buf = createNoiseBuffer(c, 2);
     const src = c.createBufferSource();
     src.buffer = buf;
-
     const filter = c.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = 300;
-    filter.Q.value = 0.6;
-
+    filter.type = "bandpass"; filter.frequency.value = 300; filter.Q.value = 0.6;
     const gain = c.createGain();
     gain.gain.setValueAtTime(0, c.currentTime);
-    gain.gain.linearRampToValueAtTime(0.06, c.currentTime + 0.5);
-    gain.gain.linearRampToValueAtTime(0.06, c.currentTime + 1.5);
-    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 2.5);
-
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(c.destination);
-    src.start();
-    src.stop(c.currentTime + 2.5);
+    gain.gain.linearRampToValueAtTime(0.05, c.currentTime + 0.4);
+    gain.gain.linearRampToValueAtTime(0.05, c.currentTime + 1.2);
+    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 2);
+    src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+    src.start(); src.stop(c.currentTime + 2);
   },
 
   crowdGasp(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-
-    const buf = createNoiseBuffer(c, 0.8);
+    const buf = createNoiseBuffer(c, 0.6);
     const src = c.createBufferSource();
     src.buffer = buf;
-
     const bp = c.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 800;
-    bp.Q.value = 1.2;
-
+    bp.type = "bandpass"; bp.frequency.value = 800; bp.Q.value = 1.2;
     const gain = c.createGain();
-    gain.gain.setValueAtTime(0.14, c.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.8);
-
-    src.connect(bp);
-    bp.connect(gain);
-    gain.connect(c.destination);
-    src.start();
-    src.stop(c.currentTime + 0.8);
-
-    playTone(c, 250, 0.5, "sine", 0.06, 0);
+    gain.gain.setValueAtTime(0.12, c.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.6);
+    src.connect(bp); bp.connect(gain); gain.connect(c.destination);
+    src.start(); src.stop(c.currentTime + 0.6);
   },
 
   setTension(level: number): void {
     const clamped = Math.max(0, Math.min(100, level));
     const c = ensureCtx();
     if (!c) return;
-
     if (clamped === 0) {
-      if (tensionOsc) {
-        try { tensionOsc.stop(); } catch {}
-        tensionOsc = null;
-        tensionGain = null;
-      }
+      if (tensionOsc) { try { tensionOsc.stop(); } catch {} tensionOsc = null; tensionGain = null; }
       return;
     }
-
     if (!tensionOsc) {
       tensionOsc = c.createOscillator();
       tensionGain = c.createGain();
@@ -512,89 +351,73 @@ export const audioEngine = {
       tensionGain.connect(c.destination);
       tensionOsc.start();
     }
-
-    const vol = (clamped / 100) * 0.07;
-    tensionGain!.gain.linearRampToValueAtTime(vol, c.currentTime + 0.3);
-    const freq = 55 + (clamped / 100) * 25;
-    tensionOsc!.frequency.linearRampToValueAtTime(freq, c.currentTime + 0.3);
+    tensionGain!.gain.linearRampToValueAtTime((clamped / 100) * 0.06, c.currentTime + 0.3);
+    tensionOsc!.frequency.linearRampToValueAtTime(55 + (clamped / 100) * 25, c.currentTime + 0.3);
   },
 
   playGavel(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-    playTone(c, 1800, 0.04, "sine", 0.3, 0);
-    playTone(c, 900, 0.06, "sine", 0.2, 0.01);
-    playNoiseBurst(c, 0.05, 0.18, 3000, 0);
-    playTone(c, 400, 0.12, "sine", 0.1, 0.03);
+    playTone(c, 1800, 0.04, "sine", 0.25, 0);
+    playTone(c, 900, 0.06, "sine", 0.15, 0.01);
+    playTone(c, 400, 0.12, "sine", 0.08, 0.03);
   },
 
   playBidConfirm(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-    playTone(c, 880, 0.08, "sine", 0.12, 0);
-    playTone(c, 1320, 0.06, "sine", 0.1, 0.05);
+    playTone(c, 880, 0.06, "sine", 0.1, 0);
+    playTone(c, 1320, 0.05, "sine", 0.08, 0.04);
   },
 
   playClockTick(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-    playTone(c, 1200, 0.025, "sine", 0.06, 0);
+    playTone(c, 1200, 0.02, "sine", 0.05, 0);
   },
 
   playDramaticRumble(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-
     const osc = c.createOscillator();
     const gain = c.createGain();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(40, c.currentTime);
-    osc.frequency.linearRampToValueAtTime(60, c.currentTime + 0.8);
+    osc.frequency.linearRampToValueAtTime(60, c.currentTime + 0.7);
     gain.gain.setValueAtTime(0, c.currentTime);
-    gain.gain.linearRampToValueAtTime(0.1, c.currentTime + 0.4);
-    gain.gain.linearRampToValueAtTime(0.14, c.currentTime + 0.7);
-    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.0);
-
+    gain.gain.linearRampToValueAtTime(0.08, c.currentTime + 0.35);
+    gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.9);
     const filter = c.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 120;
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(c.destination);
-    osc.start(c.currentTime);
-    osc.stop(c.currentTime + 1.0);
+    filter.type = "lowpass"; filter.frequency.value = 120;
+    osc.connect(filter); filter.connect(gain); gain.connect(c.destination);
+    osc.start(c.currentTime); osc.stop(c.currentTime + 0.9);
   },
 
   playSoldFanfare(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-
-    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5, 1567.98];
-    const durations = [0.12, 0.12, 0.12, 0.15, 0.15, 0.3];
+    const notes = [523.25, 659.25, 783.99, 1046.5];
     let time = 0;
     for (let i = 0; i < notes.length; i++) {
-      playTone(c, notes[i], durations[i], "sine", 0.12, time);
-      playTone(c, notes[i] * 0.5, durations[i], "triangle", 0.06, time);
-      time += durations[i] * 0.7;
+      playTone(c, notes[i], 0.12, "sine", 0.1, time);
+      time += 0.1;
     }
-    playNoiseBurst(c, 0.8, 0.08, 2500, 0.1);
-    playTone(c, 523.25, 0.4, "sine", 0.14, time + 0.05);
-    playTone(c, 659.25, 0.4, "sine", 0.12, time + 0.05);
-    playTone(c, 783.99, 0.4, "sine", 0.12, time + 0.05);
+    playTone(c, 523.25, 0.35, "sine", 0.12, time + 0.05);
+    playTone(c, 659.25, 0.35, "sine", 0.1, time + 0.05);
+    playTone(c, 783.99, 0.35, "sine", 0.1, time + 0.05);
   },
 
   playNewPlayerAlert(): void {
     if (!enabled) return;
     const c = ensureCtx();
     if (!c) return;
-    playTone(c, 523, 0.1, "sine", 0.15, 0);
-    playTone(c, 659, 0.1, "sine", 0.15, 0.12);
-    playTone(c, 784, 0.15, "sine", 0.18, 0.24);
+    playTone(c, 523, 0.08, "sine", 0.12, 0);
+    playTone(c, 659, 0.08, "sine", 0.12, 0.1);
+    playTone(c, 784, 0.12, "sine", 0.15, 0.2);
   },
 };
