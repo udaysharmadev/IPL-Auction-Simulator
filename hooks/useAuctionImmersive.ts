@@ -13,7 +13,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export function useAuctionImmersive(auction: AuctionState | null, enabled: boolean) {
+export function useAuctionImmersive(auction: AuctionState | null, enabled: boolean, onCountdownComplete?: () => void) {
   const [commentary, setCommentary] = useState("");
   const [auctioneerLine, setAuctioneerLine] = useState("");
   const lastPhaseRef = useRef<string>("");
@@ -150,6 +150,11 @@ export function useAuctionImmersive(auction: AuctionState | null, enabled: boole
         audioEngine.playClockTick();
         await audioEngine.announceGoingTwice(auction.currentBid);
         audioEngine.playClockTick();
+        await delay(400);
+
+        // Release the lock BEFORE advancing so the SOLD handler can run
+        busyRef.current = false;
+        onCountdownComplete?.();
       });
     }
 

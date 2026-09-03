@@ -251,30 +251,30 @@ export const audioEngine = {
   },
 
   async announceBidStart(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} opens at ${formatCrore(amount)} crore!`, "male");
+    await speakAsync(`${teamName} opens at ${formatCrore(amount)}!`, "male");
   },
 
   async announceBid(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} at ${formatCrore(amount)} crore!`, "male");
+    await speakAsync(`${teamName} at ${formatCrore(amount)}!`, "male");
   },
 
   async announceCounterBid(teamName: string, amount: number): Promise<void> {
-    await speakAsync(`${teamName} counters! ${formatCrore(amount)} crore!`, "male");
+    await speakAsync(`${teamName} counters! ${formatCrore(amount)}!`, "male");
   },
 
   async announceGoingOnce(amount: number): Promise<void> {
-    await speakAsync(`Going once... at ${formatCrore(amount)} crore!`, "male");
+    await speakAsync(`Going once... ${formatCrore(amount)}`, "male");
     await new Promise((r) => setTimeout(r, 1500));
   },
 
   async announceGoingTwice(amount: number): Promise<void> {
-    await speakAsync(`Going twice... ${formatCrore(amount)} crore!`, "male");
+    await speakAsync(`Going twice... ${formatCrore(amount)}`, "male");
     await new Promise((r) => setTimeout(r, 1200));
   },
 
   async announceSold(playerName: string, teamName: string, amount: number): Promise<void> {
     this.playGavel();
-    await speakAsync(`SOLD! ${playerName} goes to ${teamName} for ${formatCrore(amount)} crore!`, "male", true);
+    await speakAsync(`SOLD! ${playerName} goes to ${teamName} for ${formatCrore(amount)}!`, "male", true);
   },
 
   async announcePassed(playerName: string): Promise<void> {
@@ -307,9 +307,9 @@ export const audioEngine = {
 
   async commentatorBiddingWar(team1: string, team2: string, amount: number): Promise<void> {
     const lines = [
-      `Kya baat hai! ${team1} aur ${team2} ke beech zordaar takkar chal rahi hai! ${formatCrore(amount)} crore tak pahunch gayi bid!`,
+      `Kya baat hai! ${team1} aur ${team2} ke beech zordaar takkar chal rahi hai! ${formatCrore(amount)} tak pahunch gayi bid!`,
       `Dekhiye dosto, ${team1} aur ${team2} dono piche hatne ko tayyar nahi! Bohot intense scene hai auction room mein!`,
-      `Wow! Ye toh bohot exciting ho gaya! ${formatCrore(amount)} crore ki bid par dono teams lad rahi hain!`,
+      `Wow! Ye toh bohot exciting ho gaya! ${formatCrore(amount)} ki bid par dono teams lad rahi hain!`,
     ];
     const line = lines[Math.floor(Math.random() * lines.length)];
     await speakAsync(line, "female");
@@ -317,8 +317,8 @@ export const audioEngine = {
 
   async commentatorBigBid(teamName: string, amount: number): Promise<void> {
     const lines = [
-      `${teamName} ne badi bid lagayi hai! ${formatCrore(amount)} crore! Bohot daring move hai ye!`,
-      `Oho! ${formatCrore(amount)} crore ki bid! ${teamName} ko ye player chahiye, koi shak nahi!`,
+      `${teamName} ne badi bid lagayi hai! ${formatCrore(amount)}! Bohot daring move hai ye!`,
+      `Oho! ${formatCrore(amount)} ki bid! ${teamName} ko ye player chahiye, koi shak nahi!`,
     ];
     const line = lines[Math.floor(Math.random() * lines.length)];
     await speakAsync(line, "female");
@@ -326,8 +326,8 @@ export const audioEngine = {
 
   async commentatorSold(playerName: string, teamName: string, amount: number): Promise<void> {
     const lines = [
-      `Bohot badhiya! ${playerName} ${teamName} ke paas gaye ${formatCrore(amount)} crore mein! Shandaar pickup hai ye!`,
-      `And finally! ${playerName} ${teamName} ka ho gaya! ${formatCrore(amount)} crore mein ek shandaar player mil gaya unhe!`,
+      `Bohot badhiya! ${playerName} ${teamName} ke paas gaye ${formatCrore(amount)} mein! Shandaar pickup hai ye!`,
+      `And finally! ${playerName} ${teamName} ka ho gaya! ${formatCrore(amount)} mein ek shandaar player mil gaya unhe!`,
     ];
     const line = lines[Math.floor(Math.random() * lines.length)];
     await speakAsync(line, "female");
@@ -344,7 +344,7 @@ export const audioEngine = {
 
   async commentatorBudgetAlert(teamName: string, remaining: number): Promise<void> {
     await speakAsync(
-      `Dhyan dein dosto! ${teamName} ke paas ab sirf ${formatCrore(remaining)} crore bache hain purse mein. Bohot soch samajh ke chalna hoga!`,
+      `Dhyan dein dosto! ${teamName} ke paas ab sirf ${formatCrore(remaining)} bache hain purse mein. Bohot soch samajh ke chalna hoga!`,
       "female"
     );
   },

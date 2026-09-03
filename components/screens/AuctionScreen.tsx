@@ -47,7 +47,10 @@ export default function AuctionScreen() {
   const auctionMatchesSelection = auctionMatchesSession(auction, franchiseId, onboarding.setup ?? auctionSeed);
 
   useAuctionKeyboard(auction, { bid, pass, advance, toggleSound });
-  const { commentary, auctioneerLine, toggleAudio } = useAuctionImmersive(auction, auction?.soundOn ?? false);
+  const { commentary, auctioneerLine, toggleAudio } = useAuctionImmersive(auction, auction?.soundOn ?? false, useCallback(() => {
+    const currentPhase = useGameStore.getState().auction?.phase;
+    if (currentPhase === "FINAL_CALL") advance();
+  }, [advance]));
   useEffect(() => { if (onboarding.franchiseId && onboarding.franchiseId !== franchiseId) setFranchiseId(onboarding.franchiseId); }, [onboarding.franchiseId, franchiseId]);
 
   const clearPeerResponseTimer = useCallback((nextState: "IDLE" | "PAUSED" = "IDLE") => {
