@@ -160,73 +160,62 @@ export const audioEngine = {
   },
 
   async announceOpenBid(teamName: string, amount: number): Promise<void> {
-    await speakNow(`${teamName} opens at ${formatCrore(amount)}!`, "male", { rate: 1.0 });
+    await speakNow(`${teamName} opens at ${formatCrore(amount)}!`, "male", { rate: 1.1 });
   },
 
   async announceBid(teamName: string, amount: number): Promise<void> {
-    await speakNow(`${teamName} at ${formatCrore(amount)}!`, "male", { rate: 1.0 });
+    await speakNow(`${teamName}, ${formatCrore(amount)}!`, "male", { rate: 1.15 });
   },
 
   async announceCounterBid(teamName: string, amount: number): Promise<void> {
-    await speakNow(`${teamName} counters! ${formatCrore(amount)}!`, "male", { rate: 1.02 });
+    await speakNow(`${teamName} counters, ${formatCrore(amount)}!`, "male", { rate: 1.15 });
   },
 
   async announceGoingOnce(amount: number): Promise<void> {
     await speakNow(`Going once. ${formatCrore(amount)}.`, "male", { rate: 0.88 });
-    await delay(1400);
+    await delay(1200);
   },
 
   async announceGoingTwice(amount: number): Promise<void> {
     await speakNow(`Going twice. ${formatCrore(amount)}.`, "male", { rate: 0.85 });
-    await delay(1100);
+    await delay(1000);
   },
 
   async announceSold(playerName: string, teamName: string, amount: number): Promise<void> {
     this.playGavel();
-    await delay(300);
-    await speakNow(`Sold! ${playerName} goes to ${teamName} for ${formatCrore(amount)}!`, "male", { rate: 0.92, volume: 1.0 });
+    await delay(250);
+    await speakNow(`Sold! ${playerName} to ${teamName}, ${formatCrore(amount)}!`, "male", { rate: 0.95, volume: 1.0 });
   },
 
   async announcePassed(playerName: string): Promise<void> {
-    await speakNow(`${playerName} goes unsold.`, "male", { rate: 0.9 });
+    await speakNow(`${playerName} unsold.`, "male", { rate: 0.95 });
   },
 
   // ── COMMENTATOR (Hindi Female) ─────────────────────────────
 
   async commentatorSay(text: string): Promise<void> {
-    await speakNow(text, "female", { rate: 0.92 });
-  },
-
-  async commentatorIntro(): Promise<void> {
-    await speakNow("Namaskar dosto! Bohot exciting auction hone wala hai aaj.", "female", { rate: 0.9 });
-    await delay(600);
-    await speakNow("Dekhte hain kaunsi team kis player ke liye kitni badi rakam lagati hai.", "female", { rate: 0.9 });
+    await speakNow(text, "female", { rate: 1.0 });
   },
 
   async commentatorPlayerContext(name: string, role: string, stats: string): Promise<void> {
     const roleHindi = role === "BAT" ? "batsman" : role === "BOWL" ? "bowler" : role === "WK" ? "wicketkeeper" : "all-rounder";
-    await speakNow(`${name} bohot achhe ${roleHindi} hain. ${stats}.`, "female", { rate: 0.9 });
+    await speakNow(`${name} bohot achhe ${roleHindi} hain. ${stats}.`, "female", { rate: 1.0 });
   },
 
   async commentatorBidWar(team1: string, team2: string): Promise<void> {
     const lines = [
-      `${team1} aur ${team2} ke beech zordaar takkar chal rahi hai!`,
-      `Dekhiye dosto, ${team1} aur ${team2} dono piche hatne ko tayyar nahi!`,
-      `Wow! ${team1} aur ${team2} lad rahi hain, bohot exciting hai!`,
+      `${team1} aur ${team2} takkar!`,
+      `${team1} vs ${team2}, bohot intense!`,
     ];
-    await speakNow(lines[Math.floor(Math.random() * lines.length)], "female", { rate: 0.92 });
+    await speakNow(lines[Math.floor(Math.random() * lines.length)], "female", { rate: 1.05 });
   },
 
   async commentatorSoldReaction(playerName: string, teamName: string, amount: number): Promise<void> {
-    const lines = [
-      `Shandaar pickup! ${playerName} ${teamName} ke paas gaye ${formatCrore(amount)} mein!`,
-      `Bohot badhiya! ${teamName} ko mila ek champion player!`,
-    ];
-    await speakNow(lines[Math.floor(Math.random() * lines.length)], "female", { rate: 0.9 });
+    await speakNow(`Shandaar pickup! ${playerName} ${teamName} ke paas!`, "female", { rate: 1.0 });
   },
 
   async commentatorUnsoldReaction(playerName: string): Promise<void> {
-    await speakNow(`Afsos! ${playerName} unsold rahe. Bohot surprising hai ye.`, "female", { rate: 0.9 });
+    await speakNow(`Afsos! ${playerName} unsold.`, "female", { rate: 1.0 });
   },
 
   async commentatorBudgetAlert(teamName: string, remaining: number): Promise<void> {

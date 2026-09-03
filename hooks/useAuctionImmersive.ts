@@ -19,6 +19,10 @@ function getTeamShortName(actor: string | undefined, userFranchiseId: string): s
   return teamById.get(actor as FranchiseId)?.shortName ?? actor;
 }
 
+function formatCr(value: number): string {
+  return `₹${value} Cr`;
+}
+
 export function useAuctionImmersive(
   auction: AuctionState | null,
   enabled: boolean,
@@ -31,21 +35,23 @@ export function useAuctionImmersive(
   const lastEventCountRef = useRef(0);
   const introPlayedRef = useRef(false);
   const busyRef = useRef(false);
-  const voiceQueueRef = useRef<Array<() => Promise<void>>>([]);
-  const processingQueueRef = useRef(false);
+  const speakingRef = useRef(false);
+  const pendingBidVoiceRef = useRef<(() => Promise<void>) | null>(null);
 
-  const enqueueVoice = useCallback((fn: () => Promise<void>) => {
-    voiceQueueRef.current.push(fn);
-    if (!processingQueueRef.current) {
-      processingQueueRef.current = true;
-      (async () => {
-        while (voiceQueueRef.current.length > 0) {
-          const task = voiceQueueRef.current.shift()!;
-          await task();
-        }
-        processingQueueRef.current = false;
-      })();
+  // Cancel any pending bid voice when a new bid comes in
+  const scheduleBidVoice = useCallback((fn: () => Promise<void>) => {
+    pendingBidVoiceRef.current = fn;
+    if (!speakingRef.current) {
+      runPendingBidVoice();
     }
+  }, []);
+
+  const runPendingBidVoice = useCallback(async () => {
+    const task = pendingBidVoiceRef.current;
+    if (!task) return;
+    pendingBidVoiceRef.current = null;
+    speakingRef.current = true;
+    try { await task(); } finally { speakingRef.current = false; }
   }, []);
 
   useEffect(() => {
@@ -72,106 +78,89 @@ export function useAuctionImmersive(
     const prevPhase = lastPhaseRef.current;
     const bidCount = auction.events.filter((e) => e.type === "bid").length;
 
-    // ── GAME INTRO (first load only) ──────────────────────
+    // ── GAME INTRO ────────────────────────────────────────
     if (!introPlayedRef.current && phase === "PLAYER_PRESENTATION") {
       introPlayedRef.current = true;
-      enqueueVoice(async () => {
+      speakingRef.current = true;
+      (async () => {
         setAuctioneerLine("Welcome to IPL 2027 Mega Auction!");
         await audioEngine.auctionIntro();
-        await wait(500);
+        await wait(300);
         audioEngine.crowdCheer();
-        await wait(400);
+        await wait(300);
         await announcePlayer(auction);
-      });
+        speakingRef.current = false;
+      })();
       lastPhaseRef.current = phase;
       lastBidRef.current = auction.currentBid;
       lastEventCountRef.current = auction.events.length;
       return;
     }
 
-    // ── NEW PLAYER ON THE BLOCK ───────────────────────────
+    // ── NEW PLAYER ────────────────────────────────────────
     if (phase === "PLAYER_PRESENTATION" && prevPhase !== "PLAYER_PRESENTATION") {
-      enqueueVoice(async () => {
-        await wait(300);
+      speakingRef.current = true;
+      (async () => {
+        await wait(200);
         await announcePlayer(auction);
-      });
+        speakingRef.current = false;
+      })();
     }
 
-    // ── BIDDING PHASE ─────────────────────────────────────
+    // ── BIDDING ───────────────────────────────────────────
     if ((phase === "BIDDING" || phase === "FIRST_BID") && auction.events.length > lastEventCountRef.current) {
       const latestBidEvent = auction.events.filter((e) => e.type === "bid").at(-1);
       if (latestBidEvent) {
         const teamName = getTeamShortName(latestBidEvent.actor, auction.userFranchiseId);
         const isUser = latestBidEvent.actor === "YOU";
 
-        // Set visual text
+        // Visual text — instant
         if (isUser) {
           setAuctioneerLine(`You bid ${formatCr(auction.currentBid)}!`);
         } else {
           setAuctioneerLine(`${teamName} at ${formatCr(auction.currentBid)}!`);
         }
 
-        // Voice for every bid
-        enqueueVoice(async () => {
-          audioEngine.playBidConfirm();
-          if (isUser) {
-            // User bid — no voice (they know what they did)
-          } else if (bidCount === 1) {
-            await audioEngine.announceOpenBid(teamName, auction.currentBid);
-          } else {
-            await audioEngine.announceBid(teamName, auction.currentBid);
-          }
-        });
-
-        // Commentary for big moments
-        const player = playerById.get(auction.currentPlayerId);
-        if (player) {
-          // Fair value crossed
-          if (auction.currentBid >= player.valuation.fairValue && lastBidRef.current < player.valuation.fairValue) {
-            audioEngine.crowdGasp();
-            enqueueVoice(async () => {
-              await wait(200);
-              await audioEngine.commentatorSay("Fair value cross ho gayi! Bohot interesting ho raha hai!");
-            });
-          }
-
-          // Two-team battle
-          if (bidCount > 2 && bidCount % 4 === 0) {
-            const actors = [...new Set(auction.events.filter((e) => e.type === "bid").map((e) => e.actor))];
-            if (actors.length === 2) {
-              const t1 = getTeamShortName(actors[0], auction.userFranchiseId);
-              const t2 = getTeamShortName(actors[1], auction.userFranchiseId);
-              enqueueVoice(async () => {
-                await audioEngine.commentatorBidWar(t1, t2);
-              });
+        // Voice — short, punchy, replaces any pending bid voice
+        if (!isUser) {
+          scheduleBidVoice(async () => {
+            await wait(150);
+            audioEngine.playBidConfirm();
+            if (bidCount === 1) {
+              await audioEngine.announceOpenBid(teamName, auction.currentBid);
+            } else {
+              await audioEngine.announceBid(teamName, auction.currentBid);
             }
-          }
+          });
+        } else {
+          // User bid — just confirm sound, no voice
+          audioEngine.playBidConfirm();
+        }
 
-          // Budget warning
-          if (auction.aiTrace && bidCount > 3 && bidCount % 5 === 0) {
-            const traceTeam = auction.aiTrace.team;
-            enqueueVoice(async () => {
-              await audioEngine.commentatorBudgetAlert(traceTeam, auction.aiTrace?.maxBid ?? 0);
-            });
-          }
+        // Fair value crossed — crowd gasp + short commentary
+        const player = playerById.get(auction.currentPlayerId);
+        if (player && auction.currentBid >= player.valuation.fairValue && lastBidRef.current < player.valuation.fairValue) {
+          audioEngine.crowdGasp();
         }
       }
     }
 
     // ── FINAL CALL ────────────────────────────────────────
     if (phase === "FINAL_CALL" && prevPhase !== "FINAL_CALL") {
-      enqueueVoice(async () => {
+      speakingRef.current = true;
+      (async () => {
         audioEngine.playDramaticRumble();
-        await wait(500);
+        await wait(400);
         setAuctioneerLine(`Final call at ${formatCr(auction.currentBid)}...`);
         await audioEngine.announceGoingOnce(auction.currentBid);
         audioEngine.playClockTick();
         await audioEngine.announceGoingTwice(auction.currentBid);
         audioEngine.playClockTick();
-        await wait(300);
+        await wait(200);
+        speakingRef.current = false;
         busyRef.current = false;
         onCountdownComplete?.();
-      });
+      })();
     }
 
     // ── SOLD ──────────────────────────────────────────────
@@ -182,14 +171,14 @@ export function useAuctionImmersive(
         : undefined;
 
       if (player && team) {
-        enqueueVoice(async () => {
+        speakingRef.current = true;
+        (async () => {
           await audioEngine.announceSold(player.identity.shortName, team.shortName, auction.currentBid);
           audioEngine.playSoldFanfare();
           audioEngine.crowdCheer();
           setCommentary(`SOLD! ${player.identity.shortName} → ${team.shortName} for ${formatCr(auction.currentBid)}!`);
-          await wait(1000);
-          await audioEngine.commentatorSoldReaction(player.identity.shortName, team.shortName, auction.currentBid);
-        });
+          speakingRef.current = false;
+        })();
       }
     }
 
@@ -197,46 +186,36 @@ export function useAuctionImmersive(
     if (phase === "PASSED" && prevPhase !== "PASSED") {
       const player = playerById.get(auction.currentPlayerId);
       if (player) {
-        enqueueVoice(async () => {
+        speakingRef.current = true;
+        (async () => {
           audioEngine.crowdMurmur();
-          await wait(300);
+          await wait(200);
           setAuctioneerLine(`${player.identity.shortName} goes unsold.`);
           await audioEngine.announcePassed(player.identity.shortName);
-          await wait(500);
-          await audioEngine.commentatorUnsoldReaction(player.identity.shortName);
-        });
+          speakingRef.current = false;
+        })();
       }
     }
 
     lastPhaseRef.current = phase;
     lastBidRef.current = auction.currentBid;
     lastEventCountRef.current = auction.events.length;
-  }, [enabled, auction?.phase, auction?.currentBid, auction?.events.length, auction?.currentIndex, enqueueVoice, onCountdownComplete]);
+  }, [enabled, auction?.phase, auction?.currentBid, auction?.events.length, auction?.currentIndex, scheduleBidVoice, onCountdownComplete]);
 
   async function announcePlayer(auction: AuctionState) {
     const player = playerById.get(auction.currentPlayerId);
     if (!player) return;
 
     audioEngine.playNewPlayerAlert();
-    await wait(400);
+    await wait(300);
 
     const nationality = player.identity.nationality;
-    const roleMap: Record<string, string> = { BAT: "batsman", BOWL: "bowler", AR: "all-rounder", WK: "wicketkeeper" };
-    const roleLabel = roleMap[player.role.primary] || player.role.primary;
     const basePrice = player.auctionData.basePrice ?? 1;
 
     setAuctioneerLine(`${player.identity.shortName} on the block`);
     await audioEngine.announcePlayer(player.identity.shortName, nationality, player.role.primary, basePrice);
 
-    // Hindi commentator adds context
-    const statsParts: string[] = [];
-    if (player.realData.runs > 0) statsParts.push(`${player.realData.runs} runs in IPL`);
-    if (player.realData.wickets > 0) statsParts.push(`${player.realData.wickets} wickets`);
-    if (player.realData.strikeRate) statsParts.push(`strike rate ${player.realData.strikeRate}`);
-    const stats = statsParts.length > 0 ? statsParts.join(", ") : `Overall ${player.simulationData.overall}`;
-    await audioEngine.commentatorPlayerContext(player.identity.shortName, player.role.primary, stats);
-
-    setCommentary(`${player.identity.name} (${roleLabel}) • ${nationality} • Base: ${formatCr(basePrice)} • Overall: ${player.simulationData.overall}`);
+    setCommentary(`${player.identity.name} • ${nationality} • Base: ${formatCr(basePrice)} • Overall: ${player.simulationData.overall}`);
     setAuctioneerLine(`${formatCr(basePrice)} base. Who opens?`);
   }
 
@@ -248,8 +227,4 @@ export function useAuctionImmersive(
   }, []);
 
   return { commentary, auctioneerLine, toggleAudio };
-}
-
-function formatCr(value: number): string {
-  return `₹${value} Cr`;
 }

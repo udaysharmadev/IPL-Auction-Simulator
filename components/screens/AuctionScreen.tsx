@@ -24,7 +24,7 @@ import dynamic from "next/dynamic";
 const Scene3D = dynamic(() => import("@/components/auction/Scene3D").then((m) => m.Scene3D), { ssr: false });
 
 const formatCr = (value: number) => `₹${value.toFixed(value % 1 === 0 ? 0 : 2)} Cr`;
-const PEER_RESPONSE_DELAY_MS = 1400;
+const PEER_RESPONSE_DELAY_MS = 2200;
 
 export default function AuctionScreen() {
   const { auction, currentRoute, hydrate, bid, pass, advance, reset, toggleSound, setMaxBid, toggleSmartMax, hydrationStatus } = useGameStore();
@@ -172,10 +172,14 @@ export default function AuctionScreen() {
     if (auction.highestBidder === "YOU" || !auction.highestBidder) return;
     const userState = auction.bidderStates?.[auction.userFranchiseId];
     if (userState?.status === "FOLDED") return;
+    // Tension-based delay: calm auctions feel slow, tense ones feel urgent
+    const tension = auction.tension ?? 20;
+    const baseDelay = tension > 70 ? 3000 : tension > 40 ? 4000 : 5000;
+    const jitter = Math.floor(Math.random() * 1500);
     const timer = window.setTimeout(() => {
       const current = useGameStore.getState().auction;
       if (current?.phase === "BIDDING" && current.highestBidder !== "YOU" && current.highestBidder) advance();
-    }, 3000);
+    }, baseDelay + jitter);
     return () => window.clearTimeout(timer);
   }, [advance, auction, auction?.phase, auction?.highestBidder, auction?.events.length, hydrationStatus, auctionMatchesSelection]);
 
