@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import type { AuctionState } from "@/engine/auctionEngine";
-import { isUserBidder } from "@/engine/auctionEngine";
 import { audioEngine } from "@/lib/audioEngine";
-import { generateCommentary, generateAuctioneerLine, type CommentaryContext } from "@/lib/commentary";
 import { FRANCHISES_2027, type FranchiseId } from "@/data/teams/franchises";
 import { PLAYERS_2027 } from "@/data/players/2027";
 
 const playerById = new Map(PLAYERS_2027.map((p) => [p.playerId, p]));
 const teamById = new Map(FRANCHISES_2027.map((t) => [t.id, t]));
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export function useAuctionImmersive(auction: AuctionState | null, enabled: boolean) {
   const [commentary, setCommentary] = useState("");
@@ -17,32 +19,25 @@ export function useAuctionImmersive(auction: AuctionState | null, enabled: boole
   const lastPhaseRef = useRef<string>("");
   const lastBidRef = useRef<number>(0);
   const lastEventCountRef = useRef(0);
-  const countdownRunningRef = useRef(false);
+  const introPlayedRef = useRef(false);
+  const busyRef = useRef(false);
+  const currentLotRef = useRef<string>("");
 
-  const buildContext = useCallback((): CommentaryContext | null => {
-    if (!auction) return null;
-    const player = playerById.get(auction.currentPlayerId);
-    if (!player) return null;
-    const team = auction.highestBidder ? teamById.get((auction.highestBidder === "YOU" ? auction.userFranchiseId : auction.highestBidder) as FranchiseId) : undefined;
-    return {
-      playerName: player.identity.shortName,
-      playerRole: player.role.primary,
-      nationality: player.identity.nationality,
-      category: auction.auctionCategory,
-      currentBid: auction.currentBid,
-      fairValue: player.valuation.fairValue,
-      teamName: team?.shortName,
-      remainingBudget: auction.userBudget,
-      maxBudget: auction.ruleSet.auction.startingPurse,
-      squadSize: auction.userSquad.length,
-      maxSquad: auction.ruleSet.auction.maxSquadSize,
-      overseasCount: auction.userSquad.filter((id) => playerById.get(id)?.auctionData.nationalityStatus === "OVERSEAS").length,
-      maxOverseas: auction.ruleSet.auction.maxOverseas,
-      tension: auction.tension,
-      bidCount: auction.events.filter((e) => e.type === "bid").length,
-      phase: auction.phase === "PLAYER_PRESENTATION" ? "INTRO" : auction.phase === "FIRST_BID" || auction.phase === "BIDDING" ? "BID" : auction.phase === "FINAL_CALL" ? "FINAL_CALL" : auction.phase === "SOLD" ? "SOLD" : auction.phase === "PASSED" ? "PASSED" : "SQUAD"
-    };
-  }, [auction]);
+  const runSequence = useCallback(async (fn: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try { await fn(); } finally { busyRef.current = false; }
+  }, []);
+
+  const getTeamName = useCallback((actor: string | undefined): string => {
+    if (!actor) return "";
+    if (actor === "YOU") {
+      const t = teamById.get(auction?.userFranchiseId as FranchiseId);
+      return t?.shortName ?? "Your table";
+    }
+    const t = teamById.get(actor as FranchiseId);
+    return t?.shortName ?? actor;
+  }, [auction?.userFranchiseId]);
 
   useEffect(() => {
     if (!enabled || !auction) return;
@@ -63,84 +58,182 @@ export function useAuctionImmersive(auction: AuctionState | null, enabled: boole
 
   useEffect(() => {
     if (!enabled || !auction) return;
-    const ctx = buildContext();
-    if (!ctx) return;
 
     const phase = auction.phase;
     const prevPhase = lastPhaseRef.current;
+    const lotKey = `${auction.currentIndex}:${auction.currentPlayerId}`;
 
-    if (phase === "PLAYER_PRESENTATION" && prevPhase !== "PLAYER_PRESENTATION") {
-      const player = playerById.get(auction.currentPlayerId);
-      if (player) {
-        audioEngine.announcePlayer(player.identity.shortName, player.role.primary);
-        const intro = generateCommentary({ ...ctx, phase: "INTRO" });
-        setCommentary(intro);
-        setAuctioneerLine(generateAuctioneerLine({ ...ctx, phase: "INTRO" }));
-      }
+    // ── GAME INTRO (first load only) ──────────────────────
+    if (!introPlayedRef.current && phase === "PLAYER_PRESENTATION") {
+      introPlayedRef.current = true;
+      runSequence(async () => {
+        setAuctioneerLine("Welcome to IPL 2027 Mega Auction!");
+        await audioEngine.auctionIntro();
+        await delay(800);
+        audioEngine.crowdCheer();
+        await delay(500);
+
+        // Now announce the first player
+        await announceNewPlayer(auction);
+      });
+      lastPhaseRef.current = phase;
+      lastBidRef.current = auction.currentBid;
+      lastEventCountRef.current = auction.events.length;
+      currentLotRef.current = lotKey;
+      return;
     }
 
-    if (phase === "BIDDING" || phase === "FIRST_BID") {
+    // ── NEW PLAYER ON THE BLOCK ───────────────────────────
+    if (phase === "PLAYER_PRESENTATION" && prevPhase !== "PLAYER_PRESENTATION") {
+      currentLotRef.current = lotKey;
+      runSequence(async () => {
+        await announceNewPlayer(auction);
+      });
+    }
+
+    // ── BIDDING PHASE ─────────────────────────────────────
+    if ((phase === "BIDDING" || phase === "FIRST_BID") && auction.events.length > lastEventCountRef.current) {
       const latestBidEvent = auction.events.filter((e) => e.type === "bid").at(-1);
-      if (latestBidEvent && auction.events.length > lastEventCountRef.current) {
-        if (latestBidEvent.actor === "YOU") {
+      if (latestBidEvent) {
+        const teamName = getTeamName(latestBidEvent.actor);
+        const isUser = latestBidEvent.actor === "YOU";
+        const bidCount = auction.events.filter((e) => e.type === "bid").length;
+
+        if (isUser) {
           audioEngine.playBidConfirm();
-          audioEngine.announceBid(auction.currentBid);
-        } else if (latestBidEvent.actor) {
-          const team = teamById.get(latestBidEvent.actor as FranchiseId);
-          if (team) {
-            audioEngine.announceRivalBid(team.shortName, auction.currentBid);
-            audioEngine.playBidConfirm();
+          setAuctioneerLine(`You bid ₹${auction.currentBid} crore!`);
+        } else if (teamName) {
+          audioEngine.playBidConfirm();
+          if (bidCount === 1) {
+            setAuctioneerLine(`${teamName} opens the bidding at ₹${auction.currentBid} crore!`);
+            audioEngine.crowdMurmur();
+          } else if (bidCount > 3) {
+            setAuctioneerLine(`${teamName} jumps in! ₹${auction.currentBid} crore!`);
+            audioEngine.crowdMurmur();
+          } else {
+            setAuctioneerLine(`${teamName} counters at ₹${auction.currentBid} crore!`);
           }
         }
-        const bidCommentary = generateCommentary({ ...ctx, phase: "BID" });
-        setCommentary(bidCommentary);
-        setAuctioneerLine(generateAuctioneerLine({ ...ctx, phase: "BID" }));
-      }
-      if (auction.currentBid > 0 && auction.currentBid >= (playerById.get(auction.currentPlayerId)?.valuation.fairValue ?? 0) && lastBidRef.current < (playerById.get(auction.currentPlayerId)?.valuation.fairValue ?? 0)) {
-        audioEngine.crowdGasp();
+
+        const player = playerById.get(auction.currentPlayerId);
+
+        // Commentator reacts to big bids or two-team battle
+        runSequence(async () => {
+          if (player && auction.currentBid >= player.valuation.fairValue && lastBidRef.current < player.valuation.fairValue) {
+            audioEngine.crowdGasp();
+            await delay(400);
+            await audioEngine.commentatorSay(
+              `${player.identity.shortName} ki fair value cross ho gayi hai! Ab bohot interesting ho raha hai!`
+            );
+          }
+
+          if (bidCount > 2 && bidCount % 3 === 0) {
+            const actors = [...new Set(auction.events.filter((e) => e.type === "bid").map((e) => e.actor))];
+            if (actors.length === 2) {
+              const t1 = getTeamName(actors[0]);
+              const t2 = getTeamName(actors[1]);
+              await audioEngine.commentatorBiddingWar(t1, t2, auction.currentBid);
+            }
+          }
+        });
       }
     }
 
-    if (phase === "FINAL_CALL" && prevPhase !== "FINAL_CALL" && !countdownRunningRef.current) {
-      countdownRunningRef.current = true;
-      audioEngine.playClockTick();
-      setCommentary(generateCommentary({ ...ctx, phase: "FINAL_CALL" }));
-      setAuctioneerLine(generateAuctioneerLine({ ...ctx, phase: "FINAL_CALL" }));
+    // ── FINAL CALL ────────────────────────────────────────
+    if (phase === "FINAL_CALL" && prevPhase !== "FINAL_CALL") {
+      runSequence(async () => {
+        audioEngine.playDramaticRumble();
+        await delay(600);
+        setAuctioneerLine(`Final call at ₹${auction.currentBid} crore...`);
 
-      (async () => {
-        await audioEngine.announceCountdown();
-        countdownRunningRef.current = false;
-      })();
+        await audioEngine.announceGoingOnce(auction.currentBid);
+        audioEngine.playClockTick();
+        await audioEngine.announceGoingTwice(auction.currentBid);
+        audioEngine.playClockTick();
+      });
     }
 
+    // ── SOLD ──────────────────────────────────────────────
     if (phase === "SOLD" && prevPhase !== "SOLD") {
-      countdownRunningRef.current = false;
       const player = playerById.get(auction.currentPlayerId);
-      const team = teamById.get((auction.highestBidder === "YOU" ? auction.userFranchiseId : (auction.highestBidder ?? "")) as FranchiseId);
+      const team = auction.highestBidder
+        ? teamById.get((auction.highestBidder === "YOU" ? auction.userFranchiseId : auction.highestBidder) as FranchiseId)
+        : undefined;
+
       if (player && team) {
-        audioEngine.playSoldFanfare();
-        audioEngine.crowdCheer();
-        audioEngine.announceSold(player.identity.shortName, team.shortName, auction.currentBid);
+        runSequence(async () => {
+          await delay(300);
+          await audioEngine.announceSold(player.identity.shortName, team.shortName, auction.currentBid);
+          audioEngine.playSoldFanfare();
+          audioEngine.crowdCheer();
+          setCommentary(`SOLD! ${player.identity.shortName} goes to ${team.shortName} for ₹${auction.currentBid} crore!`);
+
+          await delay(1200);
+          await audioEngine.commentatorSold(player.identity.shortName, team.shortName, auction.currentBid);
+        });
       }
-      setCommentary(generateCommentary({ ...ctx, phase: "SOLD" }));
-      setAuctioneerLine(generateAuctioneerLine({ ...ctx, phase: "SOLD" }));
     }
 
+    // ── PASSED ────────────────────────────────────────────
     if (phase === "PASSED" && prevPhase !== "PASSED") {
-      countdownRunningRef.current = false;
       const player = playerById.get(auction.currentPlayerId);
       if (player) {
-        audioEngine.crowdMurmur();
-        audioEngine.announcePassed(player.identity.shortName);
+        runSequence(async () => {
+          audioEngine.crowdMurmur();
+          await delay(400);
+          setAuctioneerLine(`${player.identity.shortName} goes unsold.`);
+          await audioEngine.announcePassed(player.identity.shortName);
+          await delay(600);
+          await audioEngine.commentatorUnsold(player.identity.shortName);
+        });
       }
-      setCommentary(generateCommentary({ ...ctx, phase: "PASSED" }));
-      setAuctioneerLine(generateAuctioneerLine({ ...ctx, phase: "PASSED" }));
     }
 
     lastPhaseRef.current = phase;
     lastBidRef.current = auction.currentBid;
     lastEventCountRef.current = auction.events.length;
-  }, [enabled, auction?.phase, auction?.currentBid, auction?.events.length, auction?.currentIndex, buildContext]);
+  }, [enabled, auction?.phase, auction?.currentBid, auction?.events.length, auction?.currentIndex, runSequence, getTeamName]);
+
+  async function announceNewPlayer(auction: AuctionState) {
+    const player = playerById.get(auction.currentPlayerId);
+    if (!player) return;
+
+    audioEngine.playNewPlayerAlert();
+    await delay(600);
+
+    // English auctioneer introduces the player
+    const nationality = player.identity.nationality;
+    const roleMap: Record<string, string> = { BAT: "batsman", BOWL: "bowler", AR: "all-rounder", WK: "wicketkeeper" };
+    const roleLabel = roleMap[player.role.primary] || player.role.primary;
+    const basePrice = player.auctionData.basePrice ?? 1;
+
+    setAuctioneerLine(`Up next: ${player.identity.shortName}`);
+    await audioEngine.auctioneerSay(
+      `Ladies and gentlemen, the next player on the block is ${nationality}'s finest ${roleLabel} — ${player.identity.name}!`
+    );
+    await delay(300);
+    await audioEngine.auctioneerSay(`Base price set at ${basePrice} crore.`);
+    await delay(200);
+
+    // Hindi commentator adds context
+    const statsParts: string[] = [];
+    if (player.realData.runs > 0) statsParts.push(`${player.realData.runs} runs in IPL`);
+    if (player.realData.wickets > 0) statsParts.push(`${player.realData.wickets} wickets`);
+    if (player.realData.strikeRate) statsParts.push(`strike rate ${player.realData.strikeRate}`);
+    if (player.realData.economy) statsParts.push(`economy ${player.realData.economy}`);
+    const stats = statsParts.length > 0 ? statsParts.join(", ") : `Overall rating ${player.simulationData.overall}`;
+
+    await audioEngine.commentatorPlayerIntro(
+      player.identity.shortName,
+      player.role.primary,
+      stats
+    );
+
+    setCommentary(
+      `${player.identity.name} (${roleLabel}) from ${nationality} • Base: ₹${basePrice} Cr • Overall: ${player.simulationData.overall}`
+    );
+    setAuctioneerLine(`₹${basePrice} crore base price. Who wants to open the bidding?`);
+  }
 
   const toggleAudio = useCallback(() => {
     const next = !audioEngine.isEnabled();

@@ -5,7 +5,7 @@ import { RULE_SET_SNAPSHOT } from "@/data/rules";
 import type { GameSetup } from "@/domain/onboarding";
 import { resolveAuctionSession, type AuctionSessionConfig } from "@/engine/setup/sessionConfig";
 import { auctionSaveKey, createAuctionSaveRepository, type AuctionSaveRepository } from "@/infrastructure/persistence/auctionSaveRepository";
-import { sounds } from "@/lib/sounds";
+import { audioEngine } from "@/lib/audioEngine";
 
 type GameStore = {
   auction: AuctionState | null;
@@ -118,21 +118,21 @@ export const useGameStore = create<GameStore>((set) => ({
   bid: (increment) => set((state) => {
     if (!state.auction) return state;
     const newAuction = processUserBid(state.auction, increment);
-    if (newAuction !== state.auction && state.auction.soundOn) sounds.bidPlaced();
+    if (newAuction !== state.auction && state.auction.soundOn) audioEngine.playBidConfirm();
     return { auction: newAuction };
   }),
   pass: () => set((state) => {
     if (!state.auction) return state;
     const newAuction = processPass(state.auction);
-    if (state.auction.soundOn) sounds.playerPassed();
+    if (state.auction.soundOn) audioEngine.crowdMurmur();
     return { auction: newAuction };
   }),
   advance: () => set((state) => {
     if (!state.auction) return state;
     const auction = advanceAuction(state.auction);
     if (state.auction.soundOn) {
-      if (auction.completed) sounds.playerSold();
-      else if (auction.highestBidder && auction.highestBidder !== "YOU") sounds.rivalBid();
+      if (auction.completed) audioEngine.playSoldFanfare();
+      else if (auction.highestBidder && auction.highestBidder !== "YOU") audioEngine.playBidConfirm();
     }
     return { auction, currentRoute: auction.completed ? "/auction/report" : "/auction" };
   }),
