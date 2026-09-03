@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#091015"/>
+  <rect x="16" y="16" width="480" height="480" rx="80" fill="none" stroke="#6ed0bd" stroke-width="3" opacity="0.3"/>
+  <text x="256" y="220" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="140" fill="#e27a47">27</text>
+  <text x="256" y="310" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="56" fill="#e8edf0" letter-spacing="8">IPL</text>
+  <text x="256" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-weight="600" font-size="32" fill="#6ed0bd" letter-spacing="6">AUCTION</text>
+  <rect x="80" y="400" width="352" height="3" fill="#e27a47" opacity="0.6"/>
+</svg>
