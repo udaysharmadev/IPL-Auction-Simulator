@@ -1,11 +1,17 @@
 /* Phase 2: event-driven auction presentation */
 .auction-scene { transition:filter .35s ease,box-shadow .35s ease; }
 .auction-room-canvas { position:absolute; inset:0; z-index:1; width:100%; height:100%; pointer-events:none; mix-blend-mode:screen; opacity:.9; }
-.auction-scene > *:not(.auction-room-canvas) { z-index:2; }
+.scene-3d { position:absolute; inset:0; z-index:1; }
+.auction-scene > *:not(.auction-room-canvas):not(.scene-3d) { z-index:2; }
 .auction-scene .back-wall,.auction-scene .room-floor { z-index:0!important; }
 .auction-scene .stage-platform,.auction-scene .scene-status { z-index:3; }
 .auction-scene:after { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 42%,transparent 35%,rgba(3,8,10,.42) 100%); opacity:.2; transition:opacity .35s; }
-.auction-scene.shot-final_call:after { opacity:.72; }.auction-scene.shot-hammer_sold { box-shadow:0 0 0 1px rgba(226,122,71,.48),0 12px 65px rgba(226,122,71,.16); }.auction-scene.shot-hammer_sold .stage-screen { animation:soldFlash .7s ease; }.auction-scene.shot-bid_focus .user-desk { box-shadow:0 0 28px rgba(226,122,71,.4); }.auction-scene.shot-rival_reaction .ai-desk { border-color:rgba(110,208,189,.55); }
+.auction-scene.shot-final_call:after { opacity:.72; }
+.auction-scene.shot-hammer_sold { box-shadow:0 0 0 1px rgba(226,122,71,.48),0 12px 65px rgba(226,122,71,.16); animation:soldGlow 1.5s ease; }
+.auction-scene.shot-hammer_sold .stage-screen { animation:soldFlash .7s ease; }
+.auction-scene.shot-bid_focus .user-desk { box-shadow:0 0 28px rgba(226,122,71,.4); }
+.auction-scene.shot-rival_reaction .ai-desk { border-color:rgba(110,208,189,.55); }
+@keyframes soldGlow { 0% { box-shadow:0 0 0 1px rgba(226,122,71,.48),0 12px 65px rgba(226,122,71,.16); } 50% { box-shadow:0 0 0 3px rgba(226,122,71,.6),0 0 120px rgba(226,122,71,.3); } 100% { box-shadow:0 0 0 1px rgba(226,122,71,.48),0 12px 65px rgba(226,122,71,.16); } }
 .shot-badge { position:absolute; top:14px; left:14px; z-index:5; display:flex; align-items:center; gap:6px; padding:6px 8px; color:#8ea6a9; background:rgba(7,16,20,.72); border:1px solid rgba(198,220,231,.13); font:600 8px 'Barlow Condensed'; letter-spacing:1px; }
 .tension-meter { position:absolute; top:14px; right:14px; z-index:5; width:150px; display:grid; grid-template-columns:auto 1fr 20px; align-items:center; gap:7px; padding:7px 8px; background:rgba(7,16,20,.75); border:1px solid rgba(226,122,71,.16); }.tension-meter > span { display:flex; align-items:center; gap:4px; color:#c58e72; font:600 8px 'Barlow Condensed'; letter-spacing:.8px; }.tension-meter > div { height:3px; background:#26353a; overflow:hidden; }.tension-meter i { display:block; height:100%; background:linear-gradient(90deg,#6ed0bd,#e27a47); box-shadow:0 0 9px #e27a47; }.tension-meter b { color:#dca184; font:600 10px 'Barlow Condensed'; }
 .auction-intel-strip { display:grid; grid-template-columns:auto 1fr; gap:15px; align-items:center; min-height:40px; padding:6px 12px; border:1px solid rgba(198,220,231,.1); border-top:0; background:#0d171c; }.scarcity-radar,.war-detail { display:flex; align-items:center; gap:6px; }.intel-strip-label { display:flex; align-items:center; gap:5px; color:#70858b; font:600 8px 'Barlow Condensed'; letter-spacing:1px; margin-right:3px; }.scarcity-chip { display:flex; align-items:center; gap:4px; min-width:38px; padding:4px 5px; border:1px solid rgba(198,220,231,.09); background:#15242a; }.scarcity-chip span { color:#71868b; font:600 7px 'Barlow Condensed'; }.scarcity-chip b { color:#b7c8c6; font:600 10px 'Barlow Condensed'; }.scarcity-chip.high,.scarcity-chip.critical { border-color:rgba(226,122,71,.3); }.scarcity-chip.critical b { color:#ee9268; }.war-detail { min-width:0; color:#7e9698; font-size:8px; justify-content:flex-end; }.war-detail svg { flex:none; color:#73bcae; }.war-detail span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -87,3 +93,44 @@
   .stage-player-portrait { margin-top:7px; }
   .player-facts span { font-size:8px; }
 }
+
+/* Immersive commentary overlay */
+.commentary-bar { position:absolute; bottom:60px; left:50%; transform:translateX(-50%); z-index:10; max-width:600px; width:90%; padding:10px 18px; background:rgba(7,16,20,.88); border:1px solid rgba(226,122,71,.25); border-radius:4px; text-align:center; backdrop-filter:blur(8px); animation:commentarySlide .4s ease; }
+.commentary-bar .commentary-text { color:#e8d5c4; font:500 12px 'DM Sans'; line-height:1.4; }
+.commentary-bar .auctioneer-text { color:#6ed0bd; font:600 11px 'Barlow Condensed'; letter-spacing:.8px; margin-top:4px; text-transform:uppercase; }
+@keyframes commentarySlide { from { opacity:0; transform:translateX(-50%) translateY(10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+/* Auction clock */
+.auction-clock { position:absolute; top:50%; right:20px; transform:translateY(-50%); z-index:6; width:56px; height:56px; border-radius:50%; background:rgba(7,16,20,.85); border:2px solid rgba(110,208,189,.3); display:grid; place-items:center; }
+.auction-clock.warning { border-color:rgba(226,122,71,.5); animation:clockPulse 1s ease infinite; }
+.auction-clock.critical { border-color:#e27a47; animation:clockPulse .4s ease infinite; }
+.auction-clock-value { color:#6ed0bd; font:700 18px 'Barlow Condensed'; }
+.auction-clock.warning .auction-clock-value { color:#e27a47; }
+.auction-clock.critical .auction-clock-value { color:#ff4444; }
+@keyframes clockPulse { 0%,100% { transform:translateY(-50%) scale(1); } 50% { transform:translateY(-50%) scale(1.08); } }
+
+/* Player entrance animation */
+.player-entrance { animation:playerSlideIn .6s cubic-bezier(.16,1,.3,1); }
+@keyframes playerSlideIn { from { opacity:0; transform:translateY(20px) scale(.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+
+/* Bid flash effect */
+.bid-flash { animation:bidFlash .3s ease; }
+@keyframes bidFlash { 0% { filter:brightness(1); } 50% { filter:brightness(1.4); } 100% { filter:brightness(1); } }
+
+/* Sold celebration */
+.sold-celebration { animation:soldCelebrate 1.2s ease; }
+@keyframes soldCelebrate { 0% { transform:scale(1); } 15% { transform:scale(1.05); } 30% { transform:scale(.98); } 50% { transform:scale(1.02); } 100% { transform:scale(1); } }
+
+/* Confetti overlay */
+.confetti-overlay { position:absolute; inset:0; pointer-events:none; z-index:15; overflow:hidden; }
+.confetti-piece { position:absolute; width:8px; height:8px; top:-10px; animation:confettiFall 3s linear forwards; }
+@keyframes confettiFall { 0% { transform:translateY(0) rotate(0deg); opacity:1; } 100% { transform:translateY(100vh) rotate(720deg); opacity:0; } }
+
+/* Screen shake for big moments */
+.screen-shake { animation:screenShake .4s ease; }
+@keyframes screenShake { 0%,100% { transform:translate(0); } 10% { transform:translate(-2px,1px); } 20% { transform:translate(2px,-1px); } 30% { transform:translate(-1px,2px); } 40% { transform:translate(1px,-2px); } 50% { transform:translate(-2px,0); } 60% { transform:translate(2px,1px); } 70% { transform:translate(-1px,-1px); } 80% { transform:translate(1px,2px); } 90% { transform:translate(0,-1px); } }
+
+/* Audio toggle */
+.audio-toggle { position:fixed; bottom:20px; right:20px; z-index:50; width:44px; height:44px; border-radius:50%; background:rgba(7,16,20,.9); border:1px solid rgba(110,208,189,.3); color:#6ed0bd; display:grid; place-items:center; cursor:pointer; backdrop-filter:blur(8px); transition:all .2s; }
+.audio-toggle:hover { background:rgba(110,208,189,.15); border-color:rgba(110,208,189,.5); }
+.audio-toggle.muted { color:#667b81; border-color:rgba(198,220,231,.15); }
